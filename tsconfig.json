@@ -1,0 +1,17 @@
+{
+  "extends": "./node_modules/gts/tsconfig-google.json",
+  "compilerOptions": {
+    "lib": [
+      "es2017"
+    ],
+    "rootDir": ".",
+    "outDir": "build",
+    "module": "commonjs",
+    "strict": true,
+    "target": "es2017"
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*"
+  ]
+}
