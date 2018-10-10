@@ -1,30 +1,28 @@
 import {TQueryColumns} from 'pg-promise';
 
-export interface RowObject {
-  [key: string]: string|number|boolean|void;
+export interface ColumnValueFunction<T, ReturnT> {
+  (obj: T): ReturnT;
 }
 
-export interface ColumnValueFunction<ReturnValueType> {
-  (obj: RowObject): ReturnValueType;
-}
-
-export interface ColumnValueFunction<ReturnValueType, AdditionalOptions = {}> {
-  (obj: RowObject, options?: AdditionalOptions): ReturnValueType;
-}
-
-export interface ColumnDefinition<
-    ReturnValueType = string | number | boolean | void> {
+export interface ColumnDefinition<T = {}, ReturnT = any> {
   name: string;
-  value: ColumnValueFunction<ReturnValueType>|ReturnValueType;
+  value: ColumnValueFunction<T, ReturnT>|ReturnT;
   prop?: string;
-}
-
-export interface ColumnsDefinition extends Array<ColumnDefinition> {
-  readonly [index: number]: ColumnDefinition;
 }
 
 export interface TableDefinition {
   tableName: string;
-  columnValues: ColumnsDefinition;
+  columnValues: ColumnDefinition[];
   columnSet: TQueryColumns;
+}
+
+export interface BatchInsertFunction {
+  (): Promise<void>;
+}
+
+export interface BatchObject {
+  begin: number;
+  end: number;
+  batchIndex?: number;
+  insertFunction: () => Promise<void>;
 }
