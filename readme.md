@@ -55,5 +55,9 @@ barrel.insert();
 
 ### TODO
 - [ ] finish the abstract Barrel class
-- [ ] convert current Barrel class to PostgresBarrel as subclass of Barrel
-- [ ]
+  - [ ] connect method
+  - [ ] disconnect method
+- [ ] Convert current Barrel class to PostgresBarrel as subclass of Barrel
+- [ ] Move driver implementation into drivers/pg.ts
+- [ ] support `generatedKey(tableName, columnName)` for server generated private keys.
+- [ ] consider `batch.insertFunction` as a deferred promise object
