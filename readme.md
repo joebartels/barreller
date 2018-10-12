@@ -16,8 +16,8 @@ type Food = {
   calories: number;
 }
 
-// define a column
-const foodColumnId = ColumnDefinition<FoodTable, 'foodId'> = {
+// define columns
+const foodColumnId: ColumnDefinition<FoodTable, 'foodId'> = {
   // name equals the table's column name
   name: 'food_id',
 
@@ -29,8 +29,14 @@ const foodColumnId = ColumnDefinition<FoodTable, 'foodId'> = {
   value() { return faker.random.word(); }
 };
 
-const foodColumns = ColumnDefinitions<FoodTable> = [
-  foodColumnId
+const foodColumnCalories: ColumnDefinition<FoodTable, 'calories'> = {
+  name: 'calories',
+  value: 100
+};
+
+const foodColumns: ColumnDefinitions<FoodTable> = [
+  foodColumnId,
+  foodColumnCalories
 ];
 
 const barrel = new Barrel({ pgConnectionObject });
