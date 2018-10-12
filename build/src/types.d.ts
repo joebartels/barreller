@@ -1,23 +1,31 @@
-import { TQueryColumns } from 'pg-promise';
-export interface RowObject {
-    [key: string]: string | number | boolean | void;
+import { ColumnSet } from 'pg-promise';
+export interface ColumnValueFunction<T, ReturnT> {
+    (obj: Partial<T>, columnProp: string): ReturnT | Promise<ReturnT>;
 }
-export interface ColumnValueFunction<ReturnValueType> {
-    (obj: RowObject): ReturnValueType;
-}
-export interface ColumnValueFunction<ReturnValueType, AdditionalOptions = {}> {
-    (obj: RowObject, options?: AdditionalOptions): ReturnValueType;
-}
-export interface ColumnDefinition<ReturnValueType = string | number | boolean | void> {
+export interface ColumnDefinition<T, K extends keyof T> {
     name: string;
-    value: ColumnValueFunction<ReturnValueType> | ReturnValueType;
+    value: ColumnValueFunction<T, T[K]> | T[K];
     prop?: string;
 }
-export interface ColumnsDefinition extends Array<ColumnDefinition> {
-    readonly [index: number]: ColumnDefinition;
+export interface ColumnDefinitions<T> extends Array<ColumnDefinition<T, keyof T>> {
 }
-export interface TableDefinition {
+export interface TableDefinition<T> {
     tableName: string;
-    columnValues: ColumnsDefinition;
-    columnSet: TQueryColumns;
+    columnValues: ColumnDefinitions<T>;
+    columnSet: ColumnSet;
+}
+export interface TableDefinitions {
+    [index: string]: TableDefinition<any>;
+}
+export interface InsertFunctionCallback<T> {
+    <K extends T>(row: K): void;
+}
+export interface BatchInsertFunction<T> {
+    (data: T | T[]): Promise<void>;
+}
+export interface BatchObject<T> {
+    begin: number;
+    end: number;
+    batchIndex?: number;
+    insertFunction: BatchInsertFunction<T>;
 }
