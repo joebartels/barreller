@@ -1,4 +1,3 @@
-// export { Barrel } from './barrel';
 import * as assertModule from 'assert';
 import * as pgp from 'pg-promise';
 import * as promise from 'bluebird';
