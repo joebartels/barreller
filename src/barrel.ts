@@ -1,8 +1,6 @@
 import * as assertModule from 'assert';
 import * as promise from 'bluebird';
 
-// import { BatchInsertFunction, BatchObject, ColumnDefinition, ColumnDefinitions, InsertFunctionCallback, TableDefinition, TableDefinitions } from './types';
-
 const assert = assertModule.strict;
 const hasOwnProperty = Object.prototype.hasOwnProperty;
 
@@ -119,7 +117,7 @@ export abstract class Barrel {
 
     const insertFunction = this.createInsertFunction<T>(schemaName, callback);
 
-    return this.createBatch(data, insertFunction);
+    return this.createBatch<T>(data, insertFunction);
   }
 
   createBatch<T>(
