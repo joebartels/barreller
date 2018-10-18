@@ -1,56 +1,71 @@
 import test from 'ava';
-import {lorem, random} from 'faker';
-import {Barrel} from '../src/barreller';
+import * as promise from 'bluebird';
+import { lorem, random } from 'faker';
+import { TQueryColumns } from 'pg-promise';
 
-import {TQueryColumns} from 'pg-promise';
-import {ColumnDefinition, ColumnDefinitions} from '../src/types';
+import { Barrel, BatchInsertFunction, PropertyDefinition, PropertyDefinitions, SchemaDefinition, SchemaDefinitions } from '../src/barrel';
 
-test('barrel.addTable()', t => {
-  const barrel = new Barrel({});
+function createBarrel() {
+  interface DinosaurSchema extends SchemaDefinition {
+    dinosaurs: string;
+  }
 
-  type FoodTable = { food_id: string; name: string; supplier: string; };
+  class TestBarrel extends Barrel {
+    schemas: SchemaDefinitions<DinosaurSchema> = {};
+    createInsertFunction() { return async () => {}; }
+  }
 
-  const columnFoodId: ColumnDefinition<FoodTable, 'food_id'> = {
-    name: 'food_id',
-    value() {
-      return random.uuid();
-    }
-  };
+  return new TestBarrel();
+}
 
-  const columnName: ColumnDefinition<FoodTable, 'name'> = {
-    name: 'name',
-    value() {
-      return lorem.word();
-    }
-  };
+test('Barrel._returnValue on static value', t => {
+  const value = 'hi';
+  const barrel = createBarrel();
 
-  const columnSupplier: ColumnDefinition<FoodTable, 'supplier'> = {
-    name: 'supplier',
-    value: 'acme inc.'
-  };
-
-  const columnValues: Array<ColumnDefinition<FoodTable, any>> =
-      [columnFoodId, columnName, columnSupplier];
-
-  const columnSet: TQueryColumns =
-      [{name: 'food_id', prop: 'foodId'}, {name: 'name'}, {name: 'supplier'}];
-
-  barrel.addTable<FoodTable>('food', columnValues);
-
-  const table = barrel.tables['food'];
-
-  t.is(table.tableName, 'food');
-
-  return barrel.pgp.end();
+  t.is(Barrel._returnValue.call(barrel, value), value);
 });
 
-test('barrel.generateRow() creates a RowObject', t => {
-  const barrel = new Barrel({});
+test('Barrel._returnValue on function without params', t => {
+  const value = 'hi';
+  const valueFunction = () => value;
+  const barrel = createBarrel();
+
+  t.is(Barrel._returnValue.call(barrel, valueFunction), value);
+});
+
+test('Barrel._returnValue on function with params', t => {
+  const valueFunction = (...params: any[]) => `params are ${params.join(',')}`;
+  const barrel = createBarrel();
+
+  t.is(
+    Barrel._returnValue.call(barrel, valueFunction, 'a', 'b', 'c'),
+    'params are a,b,c'
+  );
+});
+
+test('barrel.addSchema()', t => {
+  const barrel = createBarrel();
+
+  const schema = {
+    schemaName: 'food',
+    properties: [],
+    dinosaurs: 't-rex'
+  };
+
+  barrel.addSchema('food', schema);
+
+  t.deepEqual(barrel.schemas['food'], schema);
+});
+
+test('barrel.createDataObject() creates a DataObject', async t => {
+  const barrel = createBarrel();
+
   const uuid = 'b9bf40aa-5908-4210-a97e-162ca9bb470f';
 
   type FoodTable = { foodId: string; calories: number; supplier: string; };
 
-  const columnFoodId: ColumnDefinition<FoodTable, 'foodId'> = {
+  // function value
+  const columnFoodId: PropertyDefinition<FoodTable, 'foodId'> = {
     name: 'food_id',
     prop: 'foodId',
     value() {
@@ -58,155 +73,431 @@ test('barrel.generateRow() creates a RowObject', t => {
     }
   };
 
-  const columnCalories: ColumnDefinition<FoodTable, 'calories'> = {
+  // promise value
+  const columnCalories: PropertyDefinition<FoodTable, 'calories'> = {
     name: 'calories',
     value() {
-      return random.number();
+      return Promise.resolve(random.number());
     }
   };
 
-  const columnSupplier: ColumnDefinition<FoodTable, 'supplier'> = {
+  // static value
+  const foodSupplier = 'acme inc.';
+  const columnSupplier: PropertyDefinition<FoodTable, 'supplier'> = {
     name: 'supplier',
-    value: 'acme inc.'
+    value: foodSupplier
   };
 
+  const properties: PropertyDefinitions<FoodTable> = [
+    columnFoodId,
+    columnCalories,
+    columnSupplier
+  ];
 
-  const columnValues: ColumnDefinitions<FoodTable> =
-      [columnFoodId, columnCalories, columnSupplier];
+  const foodSchema = {
+    schemaName: 'food',
+    properties
+  };
 
-  barrel.addTable('food', columnValues);
+  barrel.addSchema('food', foodSchema);
 
-  const foodRow =
-      barrel.generateRow<FoodTable>(
-          'food');
+  const foodData = barrel.createDataObject<FoodTable>('food');
 
-  t.is(foodRow.foodId.length, uuid.length);
-  t.is(typeof foodRow.calories, 'number');
-  t.is(foodRow.supplier, 'acme inc.');
+  t.is(foodData.supplier, foodSupplier);
 
-  return barrel.pgp.end();
+  if (typeof foodData.foodId === 'string') {
+    t.is(foodData.foodId.length, uuid.length);
+  } else {
+    t.fail('fooData.foodId expected to be type string');
+  }
+
+  const resolvedFoodData = await promise.props(foodData);
+
+  t.is(typeof resolvedFoodData.calories, 'number');
 });
 
 test(
-    'barrel.generateRow() passes a partial RowObject to the value() function', t => {
-      t.plan(6);
+  'barrel.createDataObject() passes a partial DataObject to the value() function',
+  t => {
+    t.plan(6);
 
-      type FoodTable = { foodId: string; calories: number; vitamins: string[]; };
+    type FoodTable = { foodId: string; calories: number; vitamins: string[]; };
 
-      const barrel = new Barrel({});
-      const foodId = 'this-is-a-food-id';
-      const calories = 120;
-      const vitamins = ['A', 'B', 'C'];
+    const barrel = createBarrel();
+    const foodId = 'this-is-a-food-id';
+    const calories = 120;
+    const vitamins = ['A', 'B', 'C'];
 
-      const columnFoodId: ColumnDefinition<FoodTable, 'foodId'> = {
-        name: 'food_id',
-        prop: 'foodId',
-        value: foodId
-      };
+    const columnFoodId: PropertyDefinition<FoodTable, 'foodId'> = {
+      name: 'food_id',
+      prop: 'foodId',
+      value: foodId
+    };
 
-      const columnCalories: ColumnDefinition<FoodTable, 'calories'> = {
-        name: 'calories',
-        value(obj, currentKey) {
-          t.is(obj.foodId, foodId);
-          t.is(currentKey, 'calories');
+    const columnCalories: PropertyDefinition<FoodTable, 'calories'> = {
+      name: 'calories',
+      value(obj, currentKey) {
+        t.is(obj.foodId, foodId);
+        t.is(currentKey, 'calories');
 
-          return calories;
-        }
-      };
+        return calories;
+      }
+    };
 
-      const columnVitamins: ColumnDefinition<FoodTable, 'vitamins'> = {
-        name: 'vitamins',
-        value(obj, currentKey) {
-          t.is(obj.foodId, foodId);
-          t.is(obj.calories, calories);
-          t.is(currentKey, 'vitamins');
+    const columnVitamins: PropertyDefinition<FoodTable, 'vitamins'> = {
+      name: 'vitamins',
+      value(obj, currentKey) {
+        t.is(obj.foodId, foodId);
+        t.is(obj.calories, calories);
+        t.is(currentKey, 'vitamins');
 
-          return vitamins;
-        }
-      };
-      const columnValues: ColumnDefinitions<FoodTable> = [
-        columnFoodId,
-        columnCalories,
-        columnVitamins
-      ];
+        return vitamins;
+      }
+    };
 
-      barrel.addTable('food', columnValues);
+    const properties: PropertyDefinitions<FoodTable> = [
+      columnFoodId,
+      columnCalories,
+      columnVitamins
+    ];
 
-      const foodRow = barrel.generateRow<FoodTable>('food');
+    const schema = {
+      schemaName: 'food',
+      properties
+    };
 
-      t.deepEqual(foodRow, {foodId, calories, vitamins});
+    barrel.addSchema('food', schema);
 
-      return barrel.pgp.end();
-    });
+    const foodRow = barrel.createDataObject<FoodTable>('food');
+
+    t.deepEqual(foodRow, {foodId, calories, vitamins});
+  }
+);
 
 test(
-    'barrel.generateRow() queues a rows data into `rows` and `batches`',
-    t => {
-      type FoodTable = { foodId: string; };
-      type IngredientTable = { ingredientId: string; };
+  'barrel.generateSingleBatch()  generates a single batch for a single dataObject',
+  t => {
+    type FoodTable = { foodId: string; };
+    type IngredientTable = { ingredientId: string; };
 
-      const barrel = new Barrel({});
-      const foodId = 'this-is-a-food-id';
-      const ingredientId = 'ingredient1';
+    const barrel = createBarrel();
+    const foodId = 'this-is-a-food-id';
+    const ingredientId = 'ingredient1';
 
-      const columnFoodId: ColumnDefinition<FoodTable, 'foodId'> = {
-        name: 'food_id',
-        prop: 'foodId',
-        value: foodId
-      };
+    const columnFoodId: PropertyDefinition<FoodTable, 'foodId'> = {
+      name: 'food_id',
+      prop: 'foodId',
+      value: foodId
+    };
 
-      const columnValuesForFood: ColumnDefinitions<FoodTable> = [
-        columnFoodId
-      ];
+    const propertiesForFood: PropertyDefinitions<FoodTable> = [
+      columnFoodId
+    ];
 
-      const columnIngredientId: ColumnDefinition<IngredientTable, 'ingredientId'> = {
-        name: 'ingredient_id',
-        prop: 'ingredientId',
-        value: ingredientId
-      };
+    const columnIngredientId: PropertyDefinition<IngredientTable, 'ingredientId'> = {
+      name: 'ingredient_id',
+      prop: 'ingredientId',
+      value: ingredientId
+    };
 
-      const columnValuesForIngredient: ColumnDefinitions<IngredientTable> = [
-        columnIngredientId
-      ];
+    const propertiesForIngredient: PropertyDefinitions<IngredientTable> = [
+      columnIngredientId
+    ];
 
-      barrel.addTable('food', columnValuesForFood);
-      barrel.addTable('ingredient', columnValuesForIngredient);
+    const foodSchema = {
+      schemaName: 'food',
+      properties: propertiesForFood
+    };
 
-      t.is(barrel.rows.length, 0);
-      t.is(barrel.batches.length, 0);
+    const ingredientSchema = {
+      schemaName: 'ingredient',
+      properties: propertiesForIngredient
+    };
 
-      const foodRow = barrel.generateRow<FoodTable>('food');
+    barrel.addSchema('food', foodSchema);
+    barrel.addSchema('ingredient', ingredientSchema);
 
-      t.is(barrel.rows.length, 1);
-      t.is(barrel.batches.length, 1);
-      t.deepEqual(foodRow, {foodId});
+    t.is(barrel.dataObjects.length, 0);
+    t.is(barrel.batches.length, 0);
 
-      const [queuedData1] = barrel.rows;
-      const [queuedBatch1] = barrel.batches;
+    const foodBatch = barrel.generateSingleBatch<FoodTable>('food');
+    const [queuedData1] = barrel.dataObjects.slice(foodBatch.begin, foodBatch.end);
+    const [queuedBatch1] = barrel.batches;
 
-      t.deepEqual(queuedData1, {foodId});
-      t.is(queuedBatch1.begin, 0);
-      t.is(queuedBatch1.end, 1);
-      t.is(queuedBatch1.batchIndex, 0);
-      t.is(typeof queuedBatch1.insertFunction, 'function');
+    t.is(barrel.dataObjects.length, 1);
+    t.is(barrel.batches.length, 1);
+    t.is(queuedBatch1.begin, 0);
+    t.is(queuedBatch1.end, 1);
+    t.is(queuedBatch1.batchIndex, 0);
+    t.is(typeof queuedBatch1.insertFunction, 'function');
 
-      const ingredientRow = barrel.generateRow<FoodTable>('ingredient');
-      const [, queuedData2] = barrel.rows;
-      const [, queuedBatch2] = barrel.batches;
+    t.deepEqual(queuedData1, { foodId });
+    t.deepEqual(foodBatch, queuedBatch1);
 
-      t.deepEqual(queuedData2, {ingredientId});
-      t.is(queuedBatch2.batchIndex, 1);
-      t.is(queuedBatch2.begin, 1);
-      t.is(queuedBatch2.end, 2);
-      t.is(typeof queuedBatch2.insertFunction, 'function');
+    const ingredientBatch = barrel.generateSingleBatch<IngredientTable>('ingredient');
+    const [queuedData2] = barrel.dataObjects.slice(ingredientBatch.begin, ingredientBatch.end);
+    const [, queuedBatch2] = barrel.batches;
 
-      return barrel.pgp.end();
+    t.is(barrel.dataObjects.length, 2);
+    t.is(barrel.batches.length, 2);
+    t.is(queuedBatch2.begin, 1);
+    t.is(queuedBatch2.end, 2);
+    t.is(queuedBatch2.batchIndex, 1);
+    t.is(typeof queuedBatch2.insertFunction, 'function');
+
+    t.deepEqual(queuedData2, { ingredientId });
+    t.deepEqual(ingredientBatch, queuedBatch2);
+  }
+);
+
+test(
+  'barrel.generateManyBatches() generates a single batch for many dataObjects',
+  t => {
+    type FoodTable = { foodId: string; };
+    type IngredientTable = { ingredientId: string; };
+
+    let foodId = 1;
+    let ingredientId = 9;
+
+    const barrel = createBarrel();
+    const foodIdFunction = () => String(foodId++);
+    const ingredientIdFunction = () => String(ingredientId++);
+
+    const columnFoodId: PropertyDefinition<FoodTable, 'foodId'> = {
+      name: 'food_id',
+      prop: 'foodId',
+      value: foodIdFunction
+    };
+
+    const propertiesForFood: PropertyDefinitions<FoodTable> = [
+      columnFoodId
+    ];
+
+    const columnIngredientId: PropertyDefinition<IngredientTable, 'ingredientId'> = {
+      name: 'ingredient_id',
+      prop: 'ingredientId',
+      value: ingredientIdFunction
+    };
+
+    const propertiesForIngredient: PropertyDefinitions<IngredientTable> = [
+      columnIngredientId
+    ];
+
+    const foodSchema = {
+      schemaName: 'food',
+      properties: propertiesForFood
+    };
+
+    const ingredientSchema = {
+      schemaName: 'ingredient',
+      properties: propertiesForIngredient
+    };
+
+    barrel.addSchema('food', foodSchema);
+    barrel.addSchema('ingredient', ingredientSchema);
+
+    t.is(barrel.dataObjects.length, 0);
+    t.is(barrel.batches.length, 0);
+
+    // ROUND 1
+    const foodBatch = barrel.generateManyBatches<FoodTable>('food', 3);
+    const foodData = barrel.dataObjects.slice(foodBatch.begin, foodBatch.end);
+    const [queuedBatch1] = barrel.batches;
+
+    t.is(barrel.dataObjects.length, 3);
+    t.is(barrel.batches.length, 1);
+    t.is(queuedBatch1.begin, 0);
+    t.is(queuedBatch1.end, 3);
+    t.is(queuedBatch1.batchIndex, 0);
+    t.is(typeof queuedBatch1.insertFunction, 'function');
+    t.deepEqual(foodBatch, queuedBatch1);
+    t.deepEqual(foodData, [{ foodId: '3' }, { foodId: '2' }, { foodId: '1' }]);
+
+    // ROUND 2
+    const ingredientBatch = barrel.generateManyBatches<IngredientTable>('ingredient', 2);
+    const ingredientData = barrel.dataObjects.slice(ingredientBatch.begin, ingredientBatch.end);
+    const [, queuedBatch2] = barrel.batches;
+
+    t.is(barrel.dataObjects.length, 5);
+    t.is(barrel.batches.length, 2);
+    t.is(queuedBatch2.begin, 3);
+    t.is(queuedBatch2.end, 5);
+    t.is(queuedBatch2.batchIndex, 1);
+    t.is(typeof queuedBatch2.insertFunction, 'function');
+    t.deepEqual(ingredientBatch, queuedBatch2);
+    t.deepEqual(ingredientData, [{ ingredientId: '10' }, { ingredientId: '9' }]);
+  }
+);
+
+test('barrel.createBatch() queues many data into `dataObjects` and `batches`', t => {
+    type FoodTable = { foodId: string; };
+
+    const barrel = createBarrel();
+    const insertFunction = () => Promise.resolve();
+
+    // ROUND 1
+    const foodData1 = [{ foodId: '1' }, { foodId: '2' }];
+    const batch1 = barrel.createBatch<FoodTable>(foodData1, insertFunction);
+    const { dataObjects } = barrel;
+
+    t.is(batch1.begin, 0);
+    t.is(batch1.end, 2);
+    t.is(batch1.batchIndex, 0);
+    t.is(batch1.insertFunction, insertFunction);
+    t.deepEqual(dataObjects.slice(batch1.begin, batch1.end), foodData1);
+
+    // ROUND 2
+    const foodData2 = [{ foodId: '3' }, { foodId: '4' }, { foodId: '5' }];
+    const batch2 = barrel.createBatch<FoodTable>(foodData2, insertFunction);
+
+    t.is(batch2.begin, 2);
+    t.is(batch2.end, 5);
+    t.is(batch2.batchIndex, 1);
+    t.is(batch2.insertFunction, insertFunction);
+    t.deepEqual(dataObjects.slice(batch2.begin, batch2.end), foodData2);
+});
+
+test('barrel.createBatch() queues single data into `dataObjects` and `batches`', t => {
+    type FoodTable = { foodId: string; };
+
+    const barrel = createBarrel();
+    const insertFunction = () => Promise.resolve();
+
+    // ROUND 1
+    const foodData1 = { foodId: '1' };
+    const batch1 = barrel.createBatch<FoodTable>(foodData1, insertFunction);
+    const { dataObjects } = barrel;
+
+    t.is(batch1.begin, 0);
+    t.is(batch1.end, 1);
+    t.is(batch1.batchIndex, 0);
+    t.is(batch1.insertFunction, insertFunction);
+    t.deepEqual(dataObjects.slice(batch1.begin, batch1.end), [foodData1]);
+
+    // ROUND 2
+    const foodData2 = { foodId: '2' };
+    const batch2 = barrel.createBatch<FoodTable>(foodData2, insertFunction);
+
+    t.is(batch2.begin, 1);
+    t.is(batch2.end, 2);
+    t.is(batch2.batchIndex, 1);
+    t.is(batch2.insertFunction, insertFunction);
+    t.deepEqual(dataObjects.slice(batch2.begin, batch2.end), [foodData2]);
+});
+
+test(
+  'barrel.insert() executes the insertFunction for each batch and passes in correct data',
+  async t => {
+    interface DinosaurSchema extends SchemaDefinition {
+      dinosaurs: string;
     }
-  );
 
-// test('barrel.generateRow() with references', async t => {
-//   const barrel = new Barrel({});
+    type FoodTable = { foodId: string; };
+    type IngredientTable = { ingredientId: string; };
+    type NutritionTable = { nutritionId: string; };
 
-//   barrel.
+    class TestBarrel extends Barrel {
+      schemas: SchemaDefinitions<DinosaurSchema> = {};
+      createInsertFunction() { return async () => {}; }
+    }
 
-// });
+    const barrel = new TestBarrel();
+    const foodId = 'food-1';
+    const ingredientId = 'ingredient-1';
+    const nutritionId = 'nuntrition-1';
+
+    // dataObject w/ promise property
+    const columnFoodId: PropertyDefinition<FoodTable, 'foodId'> = {
+      name: 'food_id',
+      prop: 'foodId',
+      async value() { return promise.resolve(foodId); }
+    };
+
+    // dataObject w/ constant property
+    const columnIngredientId: PropertyDefinition<IngredientTable, 'ingredientId'> = {
+      name: 'ingredient_id',
+      prop: 'ingredientId',
+      value: ingredientId
+    };
+
+    // dataObject w/ function property (returning constant)
+    const columnNutritionId: PropertyDefinition<NutritionTable, 'nutritionId'> = {
+      name: 'nutrition_id',
+      prop: 'nutritionId',
+      value() { return nutritionId; }
+    };
+
+    const propertiesForFood: PropertyDefinitions<FoodTable> = [
+      columnFoodId
+    ];
+
+    const propertiesForIngredient: PropertyDefinitions<IngredientTable> = [
+      columnIngredientId
+    ];
+
+    const propertiesForNutrition: PropertyDefinitions<NutritionTable> = [
+      columnNutritionId
+    ];
+
+    const foodSchema = {
+      schemaName: 'food',
+      properties: propertiesForFood
+    };
+
+    const ingredientSchema = {
+      schemaName: 'ingredient',
+      properties: propertiesForIngredient
+    };
+
+    const nutritionSchema = {
+      schemaName: 'nutrition',
+      properties: [columnNutritionId]
+    };
+
+    barrel.addSchema('food', foodSchema);
+    barrel.addSchema('ingredient', ingredientSchema);
+    barrel.addSchema('nutrition', nutritionSchema);
+
+    t.is(barrel.dataObjects.length, 0);
+    t.is(barrel.batches.length, 0);
+
+    const foodBatch = barrel.generateSingleBatch<FoodTable>('food');
+    const ingredientBatch = barrel.generateSingleBatch<IngredientTable>('ingredient');
+    const nutritionBatch = barrel.generateSingleBatch<NutritionTable>('nutrition');
+
+    foodBatch.insertFunction = async foodData => {
+      if (Array.isArray(foodData)) {
+        const [data] = foodData;
+
+        t.is(foodData.length, 1);
+        t.deepEqual(data, { foodId });
+      } else {
+        t.fail('data passed to an insert function is expected to be an array');
+      }
+    };
+
+    ingredientBatch.insertFunction = async ingredientData => {
+      if (Array.isArray(ingredientData)) {
+        const [data] = ingredientData;
+
+        t.is(ingredientData.length, 1);
+        t.deepEqual(data, { ingredientId });
+      } else {
+        t.fail('data passed to an insert function is expected to be an array');
+      }
+    };
+
+    nutritionBatch.insertFunction = async nutritionData => {
+      if (Array.isArray(nutritionData)) {
+        const [data] = nutritionData;
+
+        t.is(nutritionData.length, 1);
+        t.deepEqual(data, { nutritionId });
+      } else {
+        t.fail('data passed to an insert function is expected to be an array');
+      }
+    };
+
+    await barrel.insert();
+  }
+);
