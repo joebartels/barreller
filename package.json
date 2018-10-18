@@ -7,7 +7,7 @@
     "test": "ava",
     "check": "gts check",
     "clean": "gts clean",
-    "compile": "tsc -p .",
+    "compile": "rm -rf build && tsc -p .",
     "fix": "gts fix",
     "prepare": "npm run compile",
     "pretest": "npm run compile",
