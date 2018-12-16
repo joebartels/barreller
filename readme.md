@@ -11,7 +11,7 @@ As of this writing - very much a Work In Progress... But it does work!
 ### Example usage:
 ```ts
 // define the type for the table
-type Food = {
+type FoodTable = {
   foodId: string;
   calories: number;
 }
